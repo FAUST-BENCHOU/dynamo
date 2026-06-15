@@ -161,7 +161,7 @@ async def launch_workers(args: argparse.Namespace, base_engine_args):
 
         # Create a separate DistributedRuntime for this worker (on same event loop)
 
-        runtime, loop = create_runtime(
+        runtime, _ = create_runtime(
             args.discovery_backend,
             args.request_plane,
             args.event_plane,
@@ -230,8 +230,9 @@ async def launch_workers(args: argparse.Namespace, base_engine_args):
     def signal_handler():
         asyncio.create_task(graceful_shutdown(runtimes))
 
+    event_loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, signal_handler)
+        event_loop.add_signal_handler(sig, signal_handler)
 
     logger.info("Signal handlers set up for graceful shutdown")
 
