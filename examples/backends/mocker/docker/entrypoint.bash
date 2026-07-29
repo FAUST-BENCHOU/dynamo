@@ -23,6 +23,50 @@ MODEL_3="${MODEL_3:-Qwen/Qwen3-8B}"
 # Example: MOCKER_MODELS="org/A org/B"
 MOCKER_MODELS="${MOCKER_MODELS:-}"
 
+# CLI args (container `args:` / `docker run <image> ...`) override the env vars above.
+# Supported flags (both `--flag value` and `--flag=value` forms):
+#   --models "org/A org/B" / --model / --model-path  (repeatable; overrides MOCKER_MODELS / MODEL_*)
+#   --speedup-ratio N       (overrides MOCK_SPEEDUP)
+#   --engine-type TYPE      (overrides MOCKER_ENGINE_TYPE)
+#   --http-port PORT        (overrides HTTP_PORT)
+#   --endpoint ENDPOINT     (overrides MOCKER_ENDPOINT, single-model mode only)
+#   --router-mode MODE      (overrides ROUTER_MODE)
+# Anything else (including everything after `--`) is forwarded verbatim to
+# dynamo.mocker, appended after MOCKER_EXTRA_ARGS so it wins on conflicts.
+cli_extra_args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --models|--model|--model-path)
+      MOCKER_MODELS="${MOCKER_MODELS:+${MOCKER_MODELS} }$2"; shift 2 ;;
+    --models=*|--model=*|--model-path=*)
+      MOCKER_MODELS="${MOCKER_MODELS:+${MOCKER_MODELS} }${1#*=}"; shift ;;
+    --speedup|--speedup-ratio)
+      MOCK_SPEEDUP="$2"; shift 2 ;;
+    --speedup=*|--speedup-ratio=*)
+      MOCK_SPEEDUP="${1#*=}"; shift ;;
+    --engine-type)
+      MOCKER_ENGINE_TYPE="$2"; shift 2 ;;
+    --engine-type=*)
+      MOCKER_ENGINE_TYPE="${1#*=}"; shift ;;
+    --http-port)
+      HTTP_PORT="$2"; shift 2 ;;
+    --http-port=*)
+      HTTP_PORT="${1#*=}"; shift ;;
+    --endpoint)
+      MOCKER_ENDPOINT="$2"; shift 2 ;;
+    --endpoint=*)
+      MOCKER_ENDPOINT="${1#*=}"; shift ;;
+    --router-mode)
+      ROUTER_MODE="$2"; shift 2 ;;
+    --router-mode=*)
+      ROUTER_MODE="${1#*=}"; shift ;;
+    --)
+      shift; cli_extra_args+=("$@"); break ;;
+    *)
+      cli_extra_args+=("$1"); shift ;;
+  esac
+done
+
 export DYN_DISCOVERY_BACKEND="${DYN_DISCOVERY_BACKEND:-file}"
 export DYN_FILE_KV
 # ai-dynamo 1.0.x mocker still expects a reachable NATS by default; ship nats-server in-image.
@@ -66,8 +110,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "[entrypoint] discovery=${DYN_DISCOVERY_BACKEND} file_kv=${DYN_FILE_KV} nats=${NATS_SERVER} event_plane=${DYN_EVENT_PLANE}"
-echo "[entrypoint] mocker engine=${MOCKER_ENGINE_TYPE}"
+echo "[entrypoint] mocker engine=${MOCKER_ENGINE_TYPE} speedup=${MOCK_SPEEDUP} http_port=${HTTP_PORT}"
 echo "[entrypoint] models: ${models[*]}"
+if [[ ${#cli_extra_args[@]} -gt 0 ]]; then
+  echo "[entrypoint] extra mocker args from CLI: ${cli_extra_args[*]}"
+fi
 
 nats-server -p 4222 -a 127.0.0.1 &
 pids+=("$!")
@@ -97,6 +144,8 @@ if [[ -n "${MOCKER_EXTRA_ARGS:-}" ]]; then
   # shellcheck disable=SC2206
   extra_mocker=( ${MOCKER_EXTRA_ARGS} )
 fi
+# CLI passthrough args come last so they override MOCKER_EXTRA_ARGS on conflicts.
+extra_mocker+=( "${cli_extra_args[@]}" )
 
 for m in "${models[@]}"; do
   echo "[entrypoint] starting mocker for ${m}"

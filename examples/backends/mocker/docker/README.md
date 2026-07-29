@@ -86,6 +86,34 @@ curl -s "http://localhost:30000/metrics"
 | `MOCKER_ENDPOINT` | 仅当 **单个** mocker 进程时可选，覆盖默认 `dyn://$DYN_NAMESPACE.backend.generate` |
 | `HF_TOKEN` | 仅在选用 **私有** 或 **gated**（如 `meta-llama/...`）模型时需要；默认三模型一般为公开，可不设 |
 
+除环境变量外，入口脚本也接受容器 `args`（K8s `args:` / `docker run <image> ...`），**优先级高于同名环境变量**：
+
+| 参数 | 对应环境变量 |
+|------|------|
+| `--models "org/A org/B"` / `--model` / `--model-path`（均可重复） | `MOCKER_MODELS` |
+| `--speedup-ratio N` | `MOCK_SPEEDUP` |
+| `--engine-type TYPE` | `MOCKER_ENGINE_TYPE` |
+| `--http-port PORT` | `HTTP_PORT` |
+| `--endpoint ENDPOINT` | `MOCKER_ENDPOINT` |
+| `--router-mode MODE` | `ROUTER_MODE` |
+
+其余未识别的参数（以及 `--` 之后的所有内容）原样追加传给 `dynamo.mocker`，位于 `MOCKER_EXTRA_ARGS` 之后（冲突时后者生效）。
+
+```yaml
+# K8s 示例（与 kthena router-benchmark builder 生成的 args 形态一致）
+args:
+  - --model-path
+  - deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+  - --engine-type
+  - sglang
+  - --speedup-ratio
+  - "2"
+  - --num-gpu-blocks-override      # 未识别参数 → 透传给 dynamo.mocker
+  - "5000"
+  - --max-num-seqs
+  - "128"
+```
+
 当 `MOCKER_MODELS`（或默认的三个模型）包含 **多个** ID 时，入口脚本会为每个进程分配不同的
 `--endpoint`（`generate_<model-hash>`），避免多个进程争抢同一个 `dynamo/backend/generate`。
 
